@@ -267,24 +267,27 @@ bh_returns = bh_returns.dropna()
 # 6.  PERFORMANCE METRICS
 # ─────────────────────────────────────────────────────────────
 
-def performance_report(returns: pd.Series, name: str) -> dict:
-    rets = returns.dropna()
-    cum  = (1 + rets).cumprod()
-    return {
-        "Strategy": name,
-        "Ann. Return (%)":   round((rets.mean() * 252) * 100, 2),
-        "Ann. Volatility (%)": round((rets.std() * np.sqrt(252)) * 100, 2),
-        "Sharpe Ratio":      round(sharpe_ratio(rets), 3),
-        "Max Drawdown (%)":  round(max_drawdown(cum) * 100, 2),
-        "Total Return (%)":  round((cum.iloc[-1] - 1) * 100, 2),
-        "# Trades":          int((oos_signals.diff().abs() > 0).sum()),
+def performance_report(returns: pd.Series, name: str, n_trades: int = None) -> dict:
+    rets    = returns.dropna()
+    cum     = (1 + rets).cumprod()
+    ann_ret = rets.mean() * 252
+    mdd     = max_drawdown(cum)
+    calmar  = round(ann_ret / abs(mdd), 3) if mdd != 0 else np.nan
+    result  = {
+        "Strategy":            name,
+        "Ann. Return (%)":     round(ann_ret * 100, 2),
+        "Ann. Volatility (%)": round(rets.std() * np.sqrt(252) * 100, 2),
+        "Sharpe Ratio":        round(sharpe_ratio(rets), 3),
+        "Max Drawdown (%)":    round(mdd * 100, 2),
+        "Calmar Ratio":        calmar,
+        "Total Return (%)":    round((cum.iloc[-1] - 1) * 100, 2),
+        "# Trades":            n_trades if n_trades is not None else "N/A",
     }
+    return result
 
-perf_strategy  = performance_report(oos_returns, "Pairs Trading (Active)")
+n_trades       = int((oos_signals.diff().abs() > 0).sum())
+perf_strategy  = performance_report(oos_returns, "Pairs Trading (Active)", n_trades)
 perf_benchmark = performance_report(bh_returns,  "Buy-and-Hold ALI=F")
-
-# Remove # Trades for benchmark (not applicable)
-perf_benchmark["# Trades"] = "N/A"
 
 perf_df = pd.DataFrame([perf_strategy, perf_benchmark]).set_index("Strategy")
 
