@@ -1,4 +1,4 @@
-Asset 1,Asset 2,t-stat,p-value,Cointegrated (5%),Involves ALI=F
+Asset 1,Asset 2,t-stat,p-value,Cointegrated,With benchmark
 AA,ALI=F,-4.2307,0.0033,True,True
 FCX,PICK,-3.9877,0.0075,True,False
 RIO,XLB,-3.8794,0.0106,True,False
@@ -84,7 +84,7 @@ AA,FCX,-1.9724,0.5429,False,False
 AA,XME,-1.9701,0.5441,False,False
 BHP,S32.AX,-1.9643,0.5471,False,False
 ACH,BHP,-1.9545,0.5521,False,False
-CSTM,XME,-1.9488,0.5551,False,False
+CSTM,XME,-1.9488,0.555,False,False
 AA,RIO,-1.9295,0.565,False,False
 CSTM,XLB,-1.9177,0.571,False,False
 S32.AX,XLB,-1.9104,0.5747,False,False

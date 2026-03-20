@@ -1,20 +1,3 @@
-"""
-=============================================================
-Trading Game #2 — Beating Passive Strategies
-Step 2: Cointegration Testing & Pair Selection
-=============================================================
-Author   : Margaux
-Course   : Commodities Markets & Models — ESILV
-Reference: Palazzi, R.B. (2025), Journal of Futures Markets
-
-This script:
-  - Tests all asset pairs for cointegration (Engle-Granger)
-  - Ranks pairs by p-value
-  - Selects the best pair(s) involving ALI=F
-  - Plots the spread and z-score of the best pair
-=============================================================
-"""
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -25,174 +8,105 @@ from itertools import combinations
 import warnings
 warnings.filterwarnings("ignore")
 
-# ─────────────────────────────────────────────────────────────
-# 1.  LOAD DATA  (output from step1_data.py)
-# ─────────────────────────────────────────────────────────────
-
-print("=" * 65)
-print("  TRADING GAME #2  |  Step 2: Cointegration Testing")
-print("=" * 65)
-
 log_prices = pd.read_csv("log_prices.csv", index_col=0, parse_dates=True)
 tickers    = list(log_prices.columns)
 BENCHMARK  = "ALI=F"
 
-print(f"[✓] Loaded log_prices: {log_prices.shape[0]} days × {log_prices.shape[1]} assets")
-print(f"    Tickers: {tickers}\n")
+print(f"Loaded: {log_prices.shape[0]} days x {log_prices.shape[1]} assets")
 
-# ─────────────────────────────────────────────────────────────
-# 2.  ENGLE-GRANGER COINTEGRATION TEST — ALL PAIRS
-# ─────────────────────────────────────────────────────────────
-# H0: no cointegration  →  reject if p-value < 0.05
-
-print("--- Running Engle-Granger cointegration tests on all pairs ---")
+# run engle-granger test on all pairs
+print("Running cointegration tests...")
 
 results = []
-pairs   = list(combinations(tickers, 2))
-
-for (t1, t2) in pairs:
+for t1, t2 in combinations(tickers, 2):
     try:
         score, pval, _ = coint(log_prices[t1], log_prices[t2])
         results.append({
-            "Asset 1": t1,
-            "Asset 2": t2,
-            "t-stat":  round(score, 4),
+            "Asset 1": t1, "Asset 2": t2,
+            "t-stat": round(score, 4),
             "p-value": round(pval, 4),
-            "Cointegrated (5%)": pval < 0.05,
-            "Involves ALI=F": (t1 == BENCHMARK or t2 == BENCHMARK),
+            "Cointegrated": pval < 0.05,
+            "With benchmark": (t1 == BENCHMARK or t2 == BENCHMARK),
         })
-    except Exception as e:
-        print(f"  [!] Skipped ({t1}, {t2}): {e}")
+    except:
+        pass
 
 coint_df = pd.DataFrame(results).sort_values("p-value")
-
-print(f"\n[✓] Tested {len(pairs)} pairs")
-print(f"    Cointegrated at 5%: {coint_df['Cointegrated (5%)'].sum()} pairs")
-
-print("\n--- Top 15 most cointegrated pairs ---")
+print(f"Tested {len(results)} pairs — {coint_df['Cointegrated'].sum()} cointegrated at 5%")
+print("\nTop 15 pairs:")
 print(coint_df.head(15).to_string(index=False))
 
-# ─────────────────────────────────────────────────────────────
-# 3.  BEST PAIRS INVOLVING ALI=F (our benchmark)
-# ─────────────────────────────────────────────────────────────
-
-ali_pairs = coint_df[coint_df["Involves ALI=F"]].copy()
-
-print("\n--- Pairs involving ALI=F (Aluminium Futures) ---")
+# best pair involving ALI=F
+ali_pairs = coint_df[coint_df["With benchmark"]]
+print("\nPairs with ALI=F:")
 print(ali_pairs.to_string(index=False))
 
-# Select best pair (lowest p-value involving ALI=F)
-best_row = ali_pairs.iloc[0]
-ASSET1   = best_row["Asset 1"]
-ASSET2   = best_row["Asset 2"]
-print(f"\n[✓] Best pair selected: ({ASSET1}, {ASSET2})  |  p-value = {best_row['p-value']}")
+best  = ali_pairs.iloc[0]
+A1    = best["Asset 1"]
+A2    = best["Asset 2"]
+print(f"\nSelected pair: ({A1}, {A2}) | p-value = {best['p-value']}")
 
-# Fallback: if no cointegrated pair with ALI=F, use overall best pair
-if best_row["p-value"] > 0.05:
-    fallback = coint_df.iloc[0]
-    ASSET1   = fallback["Asset 1"]
-    ASSET2   = fallback["Asset 2"]
-    print(f"[!] No cointegrated pair with ALI=F at 5%. Using: ({ASSET1}, {ASSET2}) instead.")
+if best["p-value"] > 0.05:
+    best = coint_df.iloc[0]
+    A1   = best["Asset 1"]
+    A2   = best["Asset 2"]
+    print(f"No cointegrated pair with benchmark — using ({A1}, {A2}) instead")
 
-# Save the full cointegration table
 coint_df.to_csv("cointegration_results.csv", index=False)
-print("[✓] Saved → cointegration_results.csv")
 
-# ─────────────────────────────────────────────────────────────
-# 4.  SPREAD CONSTRUCTION  (OLS hedge ratio)
-# ─────────────────────────────────────────────────────────────
+# OLS to get hedge ratio
+y     = log_prices[A1].values
+x     = add_constant(log_prices[A2].values)
+model = OLS(y, x).fit()
+beta  = model.params[1]
+alpha = model.params[0]
 
-y = log_prices[ASSET1].values
-x = add_constant(log_prices[ASSET2].values)
+spread = log_prices[A1] - beta * log_prices[A2] - alpha
 
-model  = OLS(y, x).fit()
-beta   = model.params[1]   # hedge ratio
-alpha  = model.params[0]   # intercept
+print(f"\nSpread model: log({A1}) = {alpha:.4f} + {beta:.4f} * log({A2})")
+print(f"R² = {model.rsquared:.4f}")
 
-spread = log_prices[ASSET1] - beta * log_prices[ASSET2] - alpha
+# ADF test on spread
+adf_stat, adf_pval = adfuller(spread)[:2]
+print(f"ADF test on spread: stat={adf_stat:.4f}, p={adf_pval:.4f} -> {'stationary' if adf_pval < 0.05 else 'NOT stationary'}")
 
-print(f"\n--- Spread Construction ---")
-print(f"    Model   : log({ASSET1}) = {alpha:.4f} + {beta:.4f} × log({ASSET2}) + ε")
-print(f"    R²      : {model.rsquared:.4f}")
-print(f"    Hedge β : {beta:.4f}")
-
-# ADF test on the spread  (should be stationary)
-adf_stat, adf_pval, _, _, adf_crit, _ = adfuller(spread)
-print(f"\n--- ADF Test on Spread (H0: spread has unit root) ---")
-print(f"    ADF stat : {adf_stat:.4f}")
-print(f"    p-value  : {adf_pval:.4f}  →  {'STATIONARY ✓' if adf_pval < 0.05 else 'NOT stationary ✗'}")
-
-# ─────────────────────────────────────────────────────────────
-# 5.  Z-SCORE
-# ─────────────────────────────────────────────────────────────
-
-LOOKBACK = 60   # rolling window (days) — will be optimised in step 3
-
+# z-score with 60-day lookback (will be optimised later)
+LOOKBACK  = 60
 roll_mean = spread.rolling(LOOKBACK).mean()
 roll_std  = spread.rolling(LOOKBACK).std()
 zscore    = (spread - roll_mean) / roll_std
 
-# ─────────────────────────────────────────────────────────────
-# 6.  PLOTS
-# ─────────────────────────────────────────────────────────────
+# plots
+fig, axes = plt.subplots(3, 1, figsize=(14, 12), sharex=True)
+fig.suptitle(f"Cointegration Analysis: {A1} / {A2}", fontsize=13, fontweight="bold")
 
-fig, axes = plt.subplots(3, 1, figsize=(14, 13), sharex=True)
-fig.suptitle(
-    f"Step 2 — Cointegration Analysis: {ASSET1} / {ASSET2}",
-    fontsize=13, fontweight="bold"
-)
+(log_prices[[A1, A2]] - log_prices[[A1, A2]].iloc[0]).plot(ax=axes[0])
+axes[0].set_title("Log-Prices (demeaned)")
+axes[0].grid(alpha=0.25)
 
-# -- Normalised log-prices
-ax1 = axes[0]
-(log_prices[[ASSET1, ASSET2]] - log_prices[[ASSET1, ASSET2]].iloc[0]).plot(ax=ax1)
-ax1.set_title("Log-Prices (demeaned at start)")
-ax1.set_ylabel("Log-price")
-ax1.legend()
-ax1.grid(True, alpha=0.25)
+spread.plot(ax=axes[1], color="darkorange", lw=1.0)
+roll_mean.plot(ax=axes[1], color="black", lw=1.2, linestyle="--", label="Rolling mean")
+axes[1].fill_between(spread.index, roll_mean - roll_std, roll_mean + roll_std,
+                     alpha=0.15, color="grey")
+axes[1].set_title(f"Spread = log({A1}) - {beta:.4f}*log({A2})")
+axes[1].legend()
+axes[1].grid(alpha=0.25)
 
-# -- Spread
-ax2 = axes[1]
-spread.plot(ax=ax2, color="darkorange", linewidth=1.0)
-roll_mean.plot(ax=ax2, color="black", linewidth=1.2, linestyle="--", label="Rolling mean")
-ax2.fill_between(spread.index,
-                 roll_mean - roll_std, roll_mean + roll_std,
-                 alpha=0.15, color="grey", label="±1 std")
-ax2.set_title(f"Spread  =  log({ASSET1}) − {beta:.4f}·log({ASSET2})")
-ax2.set_ylabel("Spread")
-ax2.legend()
-ax2.grid(True, alpha=0.25)
-
-# -- Z-score
-ax3 = axes[2]
-zscore.plot(ax=ax3, color="steelblue", linewidth=0.9, label="Z-score")
-ax3.axhline( 1.0, color="red",   linestyle="--", linewidth=1.2, label="+1 threshold (default)")
-ax3.axhline(-1.0, color="green", linestyle="--", linewidth=1.2, label="−1 threshold (default)")
-ax3.axhline( 0.0, color="black", linestyle="-",  linewidth=0.8)
-ax3.set_title(f"Z-Score  (lookback = {LOOKBACK} days)")
-ax3.set_ylabel("Z-Score")
-ax3.legend()
-ax3.grid(True, alpha=0.25)
+zscore.plot(ax=axes[2], color="steelblue", lw=0.9)
+axes[2].axhline( 1, color="red",   linestyle="--", lw=1.2)
+axes[2].axhline(-1, color="green", linestyle="--", lw=1.2)
+axes[2].axhline( 0, color="black", lw=0.8)
+axes[2].set_title(f"Z-Score (lookback={LOOKBACK}d)")
+axes[2].grid(alpha=0.25)
 
 plt.tight_layout()
 plt.savefig("step2_cointegration.png", dpi=150, bbox_inches="tight")
 plt.close()
-print("\n[✓] Figure saved → step2_cointegration.png")
-
-# ─────────────────────────────────────────────────────────────
-# 7.  SAVE OUTPUTS  (used by step 3)
-# ─────────────────────────────────────────────────────────────
 
 spread.to_csv("spread.csv", header=["spread"])
 zscore.to_csv("zscore.csv", header=["zscore"])
 
-pair_meta = pd.DataFrame([{
-    "asset1": ASSET1, "asset2": ASSET2,
-    "beta": beta, "alpha": alpha,
-    "coint_pval": best_row["p-value"],
-    "adf_pval": adf_pval
-}])
-pair_meta.to_csv("pair_metadata.csv", index=False)
+pd.DataFrame([{"asset1": A1, "asset2": A2, "beta": beta, "alpha": alpha,
+               "coint_pval": best["p-value"], "adf_pval": adf_pval}]).to_csv("pair_metadata.csv", index=False)
 
-print("[✓] Saved → spread.csv, zscore.csv, pair_metadata.csv")
-print("\n>>> Step 2 complete.  Next → run step3_strategy.py")
-print("=" * 65)
+print("\nSaved: cointegration_results.csv, spread.csv, zscore.csv, pair_metadata.csv")
